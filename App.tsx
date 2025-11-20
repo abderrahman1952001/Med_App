@@ -55,23 +55,45 @@ const NumberInput = ({ placeholder, max, min, decimals = 0, className = "" }: { 
     const handleInput = (e: React.FormEvent<HTMLInputElement>) => {
         const target = e.currentTarget;
         let val = target.value;
-        
-        // Allow empty
+
         if (val === '') return;
 
-        // Limit length based on max value approx digits (3 digits usually)
-        if (val.length > 4) {
-            target.value = val.slice(0, 4);
+        if (decimals > 0) {
+            // allow one decimal point and trim fractional length
+            const cleaned = val.replace(/[^0-9.]/g, '');
+            const [whole, fraction = ''] = cleaned.split('.');
+            const limitedFraction = fraction.slice(0, decimals);
+            val = whole + (cleaned.includes('.') ? `.${limitedFraction}` : '');
+        } else {
+            // integers only
+            val = val.replace(/\D/g, '');
         }
+
+        target.value = val;
     };
 
     const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
          const target = e.currentTarget;
-         // Optional validation or formatting logic could go here
+         const numericVal = parseFloat(target.value);
+
+         if (Number.isNaN(numericVal)) {
+            target.value = '';
+            return;
+         }
+
+         let clamped = numericVal;
+         if (typeof max === 'number') {
+            clamped = Math.min(clamped, max);
+         }
+         if (typeof min === 'number') {
+            clamped = Math.max(clamped, min);
+         }
+
+         target.value = decimals > 0 ? clamped.toFixed(decimals) : Math.round(clamped).toString();
     }
 
     return (
-        <input 
+        <input
             type="number"
             inputMode="decimal"
             placeholder={placeholder}
