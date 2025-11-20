@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDownIcon } from './Icons';
 import { ModeConfig } from '../types';
@@ -181,11 +181,26 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
   const [isOpen, setIsOpen] = useState(false);
   const [internalSelected, setInternalSelected] = useState<string>("");
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const [activeIndex, setActiveIndex] = useState(0);
   const styles = getModeClasses(modeConfig);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const menuId = useId();
+
+  const getOptionId = useCallback(
+    (option: string) => `${menuId}-option-${option.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}`,
+    [menuId]
+  );
 
   const selectedValue = value !== undefined ? value : internalSelected;
+
+  const focusOption = useCallback((index: number) => {
+    const option = optionRefs.current[index];
+    if (option) {
+      option.focus({ preventScroll: true });
+    }
+  }, []);
 
   const handleSelect = (val: string) => {
     if (onChange) {
@@ -196,8 +211,8 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
     setIsOpen(false);
   };
 
-  const toggleDropdown = () => {
-    if (!isOpen && buttonRef.current) {
+  const openDropdown = () => {
+    if (buttonRef.current) {
         const rect = buttonRef.current.getBoundingClientRect();
         setCoords({
             top: rect.bottom + 8,
@@ -205,7 +220,19 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
             width: rect.width
         });
     }
-    setIsOpen(!isOpen);
+    setIsOpen(true);
+  };
+
+  const closeDropdown = () => {
+    setIsOpen(false);
+  };
+
+  const toggleDropdown = () => {
+    if (isOpen) {
+      closeDropdown();
+    } else {
+      openDropdown();
+    }
   };
 
   // Click outside handler & Scroll handler to close
@@ -247,8 +274,69 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (isOpen) {
+      const selectedIndex = selectedValue ? options.indexOf(selectedValue) : -1;
+      const initialIndex = selectedIndex >= 0 ? selectedIndex : 0;
+      setActiveIndex(initialIndex);
+      requestAnimationFrame(() => focusOption(initialIndex));
+    } else {
+      optionRefs.current = [];
+      buttonRef.current?.focus({ preventScroll: true });
+    }
+  }, [focusOption, isOpen, options, selectedValue]);
+
+  const handleButtonKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (['Enter', ' ', 'Spacebar', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault();
+      if (!isOpen) {
+        const selectedIndex = selectedValue ? options.indexOf(selectedValue) : -1;
+        const initialIndex = selectedIndex >= 0 ? selectedIndex : 0;
+        setActiveIndex(initialIndex);
+        openDropdown();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        focusOption(activeIndex);
+      } else {
+        closeDropdown();
+      }
+    }
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!options.length) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((prev) => {
+        const next = (prev + 1) % options.length;
+        focusOption(next);
+        return next;
+      });
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((prev) => {
+        const next = (prev - 1 + options.length) % options.length;
+        focusOption(next);
+        return next;
+      });
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveIndex(0);
+      focusOption(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      const lastIndex = options.length - 1;
+      setActiveIndex(lastIndex);
+      focusOption(lastIndex);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeDropdown();
+    } else if (event.key === 'Tab') {
+      closeDropdown();
+    }
+  };
+
   return (
-    <div 
+    <div
         ref={containerRef}
         className={`group relative rounded-2xl bg-slate-50 dark:bg-slate-950/30 border border-slate-100 dark:border-white/5 transition-all duration-300 ease-out ${styles.focus} hover:bg-slate-100 dark:hover:bg-slate-900/50 hover:shadow-md hover:-translate-y-0.5 focus-within:-translate-y-0.5 focus-within:shadow-lg z-20 ${isOpen ? 'ring-4 ' + styles.ring : ''}`}
     >
@@ -257,10 +345,15 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
             {label}
         </label>
         
-        <button 
+        <button
             ref={buttonRef}
             type="button"
             onClick={toggleDropdown}
+            onKeyDown={handleButtonKeyDown}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            aria-controls={isOpen ? menuId : undefined}
+            role="combobox"
             className="flex w-full items-center justify-between text-left focus:outline-none"
         >
             <span className={`text-lg font-semibold truncate ${selectedValue ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-600'}`}>
@@ -273,12 +366,17 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
 
         {/* Portal Dropdown Menu */}
         {isOpen && createPortal(
-            <div 
+            <div
                 data-portal-menu="true"
-                style={{ 
-                    top: `${coords.top}px`, 
-                    left: `${coords.left}px`, 
-                    width: `${coords.width}px` 
+                id={menuId}
+                role="listbox"
+                aria-activedescendant={options[activeIndex] ? getOptionId(options[activeIndex]) : undefined}
+                tabIndex={-1}
+                onKeyDown={handleMenuKeyDown}
+                style={{
+                    top: `${coords.top}px`,
+                    left: `${coords.left}px`,
+                    width: `${coords.width}px`
                 }}
                 className="fixed z-[9999] animate-pop origin-top"
             >
@@ -287,8 +385,16 @@ export const Select: React.FC<SelectProps> = ({ label, options, modeConfig, plac
                         {options.map((option) => (
                             <button
                                 key={option}
+                                id={getOptionId(option)}
                                 type="button"
+                                role="option"
+                                aria-selected={selectedValue === option}
                                 onClick={() => handleSelect(option)}
+                                ref={(el) => {
+                                  const optionIndex = options.indexOf(option);
+                                  optionRefs.current[optionIndex] = el;
+                                }}
+                                tabIndex={-1}
                                 className={`w-full px-5 py-3 text-left text-base font-medium transition-colors ${selectedValue === option ? styles.optionSelected : `text-slate-600 dark:text-slate-400 ${styles.optionHover}`}`}
                             >
                                 {option}
